@@ -137,7 +137,7 @@ def process_video(video_file, service, output_file_path, tasks=['all']):
     output_folder = output_file_path + '/_processed_video_' + ''.join(video_file.split('/')[-1].split('.')[:-1])
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
-    cmd = 'ffmpeg -i '+ video_file + ' -r 2 -q:v 2 '+ output_folder + '/image-%d.jpeg'
+    cmd = 'ffmpeg -i '+ video_file + ' -r 1 -q:v 2 '+ output_folder + '/image-%d.jpeg'
     subprocess.call(cmd, shell=True)
     for path in os.listdir(output_folder):
         input_file_path = output_folder + '/' + path

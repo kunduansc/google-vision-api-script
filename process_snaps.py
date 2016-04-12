@@ -15,6 +15,13 @@ import pprint
 import os
 import json
 import subprocess
+import glob
+
+import django
+from django.template import loader, Template, Context
+from django.conf import settings
+settings.configure(TEMPLATE_DIRS=(os.getcwd() + '/templates',))
+django.setup()
 
 # Task feature dictionaries
 MAX_RESULTS = 10
@@ -74,6 +81,7 @@ def draw_rectangle(draw, response, item_str, color='#00ff00', index_str='boundin
 def highlight_image(image, response, output_folder, tasks):
     image.seek(0)
     im = Image.open(image)
+    im.save(output_folder + '/original_image.jpg')
     draw = ImageDraw.Draw(im)
 
     if 'all' in tasks or 'face_detection' in tasks:
@@ -137,12 +145,14 @@ def process_video(video_file, service, output_file_path, tasks=['all']):
     output_folder = output_file_path + '/_processed_video_' + ''.join(video_file.split('/')[-1].split('.')[:-1])
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
+
     cmd = 'ffmpeg -i '+ video_file + ' -r 1 -q:v 2 '+ output_folder + '/image-%d.jpeg'
     subprocess.call(cmd, shell=True)
     for path in os.listdir(output_folder):
         input_file_path = output_folder + '/' + path
         if os.path.isfile(input_file_path):
             dispatch_file(input_file_path, service, output_folder)
+    subprocess.call('cp '+video_file+ ' ' + output_folder, shell=True)
 
 def dispatch_file(input_file_path, service, output_file_path, tasks=['all']):
     print "processing file: ", input_file_path
@@ -153,6 +163,38 @@ def dispatch_file(input_file_path, service, output_file_path, tasks=['all']):
         process_video(input_file_path, service, output_file_path)
     else:
         print "Can't operate on this file extension... Giving up"
+
+def process_html(folder_path):
+    block_template = loader.get_template('block.html')
+    block_html = []
+
+    video_folders = glob.glob(folder_path + '/_processed_video_*')
+    image_folders = glob.glob(folder_path + '/_processed_image_*')
+
+    for video_folder in video_folders:
+        video_folder = os.path.abspath(video_folder)
+        file_name = video_folder.split('_processed_video_')[-1]
+        query_media = [video_folder + '/' + file_name + '.mp4', 'mp4']
+        match_media_list = []
+        images = glob.glob(video_folder + '/_processed_image_*')
+        for image in images:
+            match_media_list.append((image+'/edited_image.jpg', 'jpg', json.dumps(image + '/selective.json')))
+        block_context = Context( {"query_media": query_media,
+                                  "match_media_list": match_media_list})
+        block_html.append(block_template.render(block_context))
+
+    for image_folder in image_folders:
+        image_folder = os.path.abspath(image_folder)
+        query_media = [image_folder + '/original_image.jpg', 'jpg']
+        match_media_list = [(image_folder + '/edited_image.jpg', 'jpg', json.dumps(image_folder + '/selective.json'))]
+        block_context = Context( {"query_media": query_media,
+                                  "match_media_list": match_media_list})
+        block_html.append(block_template.render(block_context))
+
+        
+    with open(folder_path + '/result.html', 'w') as fw:
+        fw.write('\n'.join(block_html))
+            
         
 
 def main(input_file_path, output_file_path):
@@ -174,6 +216,8 @@ if __name__ == '__main__':
     parser.add_argument(
         '--out', dest='output', default=os.getcwd(),
         help='the name of the output file.')
+
     args = parser.parse_args()
 
     main(args.input_path, args.output)
+    process_html(args.output)

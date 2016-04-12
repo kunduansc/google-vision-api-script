@@ -1,0 +1,26 @@
+<div style='border: 2px solid; width:166px; height:360px; display:inline-table'>
+  <label>Query </label> <br>
+  {% if query_media.1 == 'jpg' %}
+     <img width = "162" height = "288" src = '{{ query_media.0 }}'>
+  {% endif %}
+  {% if query_media.1 == 'mp4' %}
+     <video width="162" height = "288" controls src='{{ query_media.0 }}'></video>
+  {% endif %}
+  <br> <hr>
+  <label>Original Snap</label><br>
+</div>
+{% for match_media in match_media_list %}
+<div style='border: 2px solid; width:166px; height:360px; display:inline-table'>
+  <label>Label</label> <br>
+  {% if match_media.1 == 'jpg' %}
+    <img width = "162" height = "288" src = '{{ match_media.0 }}'>
+    {% endif %}
+    {% if match_media.1 == 'mp4' %}
+    <video width="162" height = "288" controls src='{{ match_media.0 }}'></video>
+    {% endif %}
+    <br> <hr>
+    <label>Similarity:</label><br>
+    <font size="3">{{ match_media.2 }}</font>
+</div>
+{% endfor %}
+<hr>

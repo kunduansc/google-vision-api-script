@@ -1,2 +1,2 @@
-rm -rf _processed_video_test
+rm -rf _processed_video_*
 python ../process_snaps.py .

@@ -20,7 +20,7 @@ import glob
 import django
 from django.template import loader, Template, Context
 from django.conf import settings
-settings.configure(TEMPLATE_DIRS=(os.getcwd() + '/templates',))
+settings.configure(TEMPLATE_DIRS=('/home/sushobhan.nayak/scripts//templates',))
 django.setup()
 
 # Task feature dictionaries
@@ -178,7 +178,7 @@ def process_html(folder_path):
         match_media_list = []
         images = glob.glob(video_folder + '/_processed_image_*')
         for image in images:
-            match_media_list.append((image+'/edited_image.jpg', 'jpg', json.dumps(image + '/selective.json')))
+            match_media_list.append((image+'/edited_image.jpg', 'jpg', str(json.load(open(image + '/selective.json')))))
         block_context = Context( {"query_media": query_media,
                                   "match_media_list": match_media_list})
         block_html.append(block_template.render(block_context))
@@ -186,7 +186,7 @@ def process_html(folder_path):
     for image_folder in image_folders:
         image_folder = os.path.abspath(image_folder)
         query_media = [image_folder + '/original_image.jpg', 'jpg']
-        match_media_list = [(image_folder + '/edited_image.jpg', 'jpg', json.dumps(image_folder + '/selective.json'))]
+        match_media_list = [(image_folder + '/edited_image.jpg', 'jpg', str(json.load(open(image_folder + '/selective.json'))))]
         block_context = Context( {"query_media": query_media,
                                   "match_media_list": match_media_list})
         block_html.append(block_template.render(block_context))

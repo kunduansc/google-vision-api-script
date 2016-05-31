@@ -20,6 +20,9 @@ import glob
 import django
 from django.template import loader, Template, Context
 from django.conf import settings
+from time import sleep
+import multiprocessing
+
 settings.configure(TEMPLATE_DIRS=('/home/sushobhan.nayak/scripts//templates',))
 django.setup()
 
@@ -104,7 +107,7 @@ def update_data(data, key, key_string, response):
         pass
 
 def log_metadata(response, output_folder):
-    json.dump(response, open(output_folder + '/all.json', 'w'))
+    json.dump(response, open(output_folder + '/result.json', 'w'))
     data = {}
     update_data(data, 'labels', 'labelAnnotations', response)
     #data['faces'] = len(response['responses'][0].get('faceAnnotations', []))
@@ -115,6 +118,53 @@ def log_metadata(response, output_folder):
     except:
         pass
     json.dump(data, open(output_folder + '/selective.json', 'w'))
+
+def process_image_batch(batch_id, image_file_list, service, output_file_path, tasks=['all']):
+    # Batch process input images
+
+    batch_request = []
+    for image_file in image_file_list:
+        if image_file.split('.')[-1].lower() not in ['jpg', 'jpeg', 'png']:
+            print "Can't operate on this file extension... Giving up"
+            return
+    
+        max_results = 10
+        with open(image_file, 'rb') as image:
+            _features = []
+            if 'all' in tasks:
+                _features = [v for k,v in features.items()]
+            else:
+                for task in tasks:
+                    _features.append(features[task])
+            image_content = image.read()
+            batch_request.append({
+                'image': {
+                    'content': base64.b64encode(image_content).decode('UTF-8')
+                },
+            'features': _features
+            })
+        
+
+    request = service.images().annotate(body={'requests': batch_request})
+    response = request.execute()
+
+    # Pause for 1 second before next post
+    sleep(1)
+
+    # pprint.pprint(response)
+    
+    output_folder = output_file_path + '/_processed_image_' + ''.join(str(batch_id))
+    
+    print "Analysis results in folder: ", output_folder
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    # Save metadata
+    log_metadata(response, output_folder)
+
+    # Save image list
+    json.dump(image_file_list, open(output_folder + '/images.json', 'w'))
+
 
 def process_image(image_file, service, output_file_path, tasks=['all']):
     if image_file.split('.')[-1].lower() not in ['jpg', 'jpeg', 'png']:
@@ -147,20 +197,66 @@ def process_image(image_file, service, output_file_path, tasks=['all']):
             os.makedirs(output_folder)
         
         log_metadata(response, output_folder)
-        highlight_image(image, response, output_folder, tasks)
+        # highlight_image(image, response, output_folder, tasks)
 
-def process_video(video_file, service, output_file_path, tasks=['all']):
-    # Sample video and dispatch image file. 
-    output_folder = output_file_path + '/_processed_video_' + ''.join(video_file.split('/')[-1].split('.')[:-1])
+def extract_keyframes_pool(pool_param):
+    # Pool param
+    (video_file, output_file_path) = pool_param
+    return extract_keyframes(video_file, output_file_path)
+
+def extract_keyframes(video_file, output_file_path):
+    # Extract keyframes and return their path as a list
+    video_name = video_file.split('/')[-1].split('.')[:-1]
+    output_folder = output_file_path + '/_processed_video_' + ''.join(video_name)
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
-    cmd = 'ffmpeg -i '+ video_file + ' -vf fps=1 '+ output_folder + '/image-%d.jpeg'
+    # Sample based on keyframes
+    cmd = '/home/a-kunduan/Research/3rd-party/FFmpeg_build/bin/ffmpeg -ss 0 -i ' + \
+            video_file + \
+            ' -q:v 2 -vf select="eq(pict_type\,PICT_TYPE_I)" -vsync 0 ' + \
+            output_folder + \
+            '/' + \
+            ''.join(video_name) + \
+            '-frame-%d.jpeg'
+    print cmd
     subprocess.call(cmd, shell=True)
+
+    # Create frame list
+    image_list = []
     for path in os.listdir(output_folder):
         input_file_path = output_folder + '/' + path
         if os.path.isfile(input_file_path):
-            dispatch_file(input_file_path, service, output_folder)
+            image_list.append(input_file_path)
+
+    return image_list
+
+
+def process_video(video_file, service, output_file_path, tasks=['all']):
+    # Sample video and dispatch image file. 
+    video_name = video_file.split('/')[-1].split('.')[:-1]
+    output_folder = output_file_path + '/_processed_video_' + ''.join(video_name)
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    # Sample based on fps
+    # cmd = 'ffmpeg -i '+ video_file + ' -vf fps=1 '+ output_folder + '/image-%d.jpeg'
+    # Sample based on keyframes
+    cmd = 'ffmpeg -ss 0 -i ' + video_file + ' -q:v 2 -vf select="eq(pict_type\,PICT_TYPE_I)" -vsync 0 ' + output_folder + '/' + video_name + '-frame-%d.jpeg'
+    os.system(cmd)
+    # subprocess.call(cmd, shell=True)
+
+    # Create image batch
+    image_batch = []
+    for path in os.listdir(output_folder):
+        input_file_path = output_folder + '/' + path
+        if os.path.isfile(input_file_path):
+            image_batch.append(input_file_path)
+            # dispatch_file(input_file_path, service, output_folder)
+
+    # Batch process frames
+    process_image_batch(video_name, image_batch, service, output_folder)
+
     subprocess.call('cp '+video_file+ ' ' + output_folder, shell=True)
 
 def dispatch_file(input_file_path, service, output_file_path, tasks=['all']):
@@ -230,7 +326,7 @@ def process_html(folder_path):
             
         
 
-def main(input_file_path, output_file_path):
+def main(input_file_path, output_file_path, input_file_list=None, frame_dir=None):
     processed_videos = [x.split('/')[-1].split('_processed_video_')[-1] for x in glob.glob(output_file_path+"/_processed_video_*")]
     processed_images = [x.split('/')[-1].split('_processed_image_')[-1] for x in glob.glob(output_file_path+"/_processed_image_*")]
     service = get_vision_service()
@@ -239,15 +335,66 @@ def main(input_file_path, output_file_path):
         pass
     elif os.path.isdir(input_file_path):
         print 'processing folder: ', input_file_path
-        for path in os.listdir(input_file_path):
-            if path.split('.')[0] in processed_videos or path.split('.')[0] in processed_images:
-                print "EXISTS: ", path
-                continue
-            input_file = input_file_path + '/' + path
-            if os.path.isfile(input_file):
-                dispatch_file(input_file, service, output_file_path)
-                pass
+        
+        input_image_list = []
+        pool_arr = []
 
+        do_extract_frames = False
+
+        if input_file_list is not None:
+            # Read file names from filelist
+            with open(input_file_list) as f:
+                data = f.read()
+                rows = data.split('\n')
+
+                if rows[-1] == '':
+                    rows.pop()
+
+                for row in rows:
+                    input_file = input_file_path + '/' + row
+                    file_ext = input_file.split('.')[-1].lower()
+                    if file_ext in ['jpg', 'jpeg', 'png']:
+                        input_image_list.append(input_file)
+                    elif file_ext in ['mp4'] and frame_dir is not None:
+                        pool_arr.append((input_file, frame_dir))
+                    pass
+        
+        if do_extract_frames and pool_arr:
+            # Multiprocess frame extraction
+            pool = multiprocessing.Pool()
+            results = pool.map(extract_keyframes_pool, pool_arr)
+            pool.close()
+            pool.join()
+
+            # Expand image list with extracted frames
+            for result in results:
+                input_image_list.extend(result)
+        elif (not do_extract_frames) and frame_dir is not None:
+             # Assume frames are ready
+             for path in os.listdir(frame_dir):
+                 subdir_path = frame_dir + '/' + path
+                 if os.path.isdir(subdir_path):
+                     for image_name in os.listdir(subdir_path):
+                         image_path = subdir_path + '/' + image_name
+                         if os.path.isfile(image_path):
+                             input_image_list.append(image_path)
+
+        # Divide image list into batches
+        image_batch_list = []
+        batch_size = 10
+        for k in range(0, len(input_image_list), batch_size):
+            image_batch_list.append(input_image_list[k:min(k+batch_size , len(input_image_list))])
+
+        batch_id = 0
+        for image_batch in image_batch_list:
+
+            # if batch_id < 17779:
+            #     batch_id = batch_id + 1
+            #     continue
+
+            print image_batch
+            process_image_batch(batch_id, image_batch, service, output_file_path)
+            batch_id = batch_id + 1
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -258,10 +405,16 @@ if __name__ == '__main__':
         '--out', dest='output', default=os.getcwd(),
         help='the name of the output file.')
     parser.add_argument(
+        '--list', dest='filelist', default=None,
+            )
+    parser.add_argument(
+        '--frames', dest='frame_dir', default=None,
+            )
+    parser.add_argument(
         '--html_only', dest='html_only', default=False,
         help='use this if you only want to process the outputs for html')
     args = parser.parse_args()
     
     if not (args.html_only):
-        main(args.input_path, args.output)
-    process_html(args.output)
+        main(args.input_path, args.output, args.filelist, args.frame_dir)
+    # process_html(args.output)
